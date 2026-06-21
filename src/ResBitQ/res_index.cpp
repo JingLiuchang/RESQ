@@ -93,6 +93,10 @@ int main(int argc, char *argv[]) {
     std::cerr << "Loading Succeed!" << std::endl << std::endl;
     // ==============================================================================================================
     std::string str_data(dataset);
+    // Strip "mrq_" prefix so existing dataset if-blocks match unchanged.
+    // File paths still use the full dataset name (via the dataset[] char array).
+    if (str_data.size() > 4 && str_data.substr(0, 4) == "mrq_")
+        str_data = str_data.substr(4);
     std::cerr << "dataset:: " << str_data << std::endl;
 
     if (str_data == "msong") {
@@ -159,6 +163,33 @@ int main(int argc, char *argv[]) {
         IVFRES<DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary, M);
         ivf.save(index_path);
     }
+    // ---- Benchmark datasets (added for PVLDB 2027 survey) ----------------
+    // BB must be a multiple of 64 and ≤ DIM; bpd = BB/DIM
+    if (str_data == "deep1M-96") {
+        // d=96, BB=64 (only valid multiple of 64 ≤ 96), bpd≈0.667
+        const uint64_t BB = 64, DIM = 96;
+        IVFRES<DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary, M);
+        ivf.save(index_path);
+    }
+    if (str_data == "laion") {
+        // d=512, BB=256, bpd=0.5
+        const uint64_t BB = 256, DIM = 512;
+        IVFRES<DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary, M);
+        ivf.save(index_path);
+    }
+    if (str_data == "text2image") {
+        // d=200, BB=128, bpd=0.64
+        const uint64_t BB = 128, DIM = 200;
+        IVFRES<DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary, M);
+        ivf.save(index_path);
+    }
+    if (str_data == "imagenet1m") {
+        // d=768, BB=384, bpd=0.5
+        const uint64_t BB = 384, DIM = 768;
+        IVFRES<DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary, M);
+        ivf.save(index_path);
+    }
+    // msmarco1M (d=1024) handled above by find("msmarc") with BB=320, DIM=1024
 
     return 0;
 }

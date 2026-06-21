@@ -9,8 +9,11 @@ source = './DATA'
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='random projection')
     parser.add_argument('-d', '--dataset', help='dataset', default='sift')
+    parser.add_argument('-n', '--n_train', type=int, default=500000,
+                        help='max vectors used for K-Means training (0 = all)')
     args = vars(parser.parse_args())
     dataset = args['dataset']
+    n_train_cap = args['n_train']
 
     print(f"Clustering - {dataset}")
     # path
@@ -24,9 +27,11 @@ if __name__ == '__main__':
     cluster_id_path = os.path.join(path, f'{dataset}_cluster_id_{K}.ivecs')
 
     # cluster data vectors
+    X_train = X if (n_train_cap <= 0 or n_train_cap >= len(X)) else X[:n_train_cap]
+    print(f"Training K-Means on {len(X_train)} / {len(X)} vectors")
     index = faiss.index_factory(D, f"IVF{K},Flat")
     index.verbose = True
-    index.train(X)
+    index.train(X_train)
     centroids = index.quantizer.reconstruct_n(0, index.nlist)
     dist_to_centroid, cluster_id = index.quantizer.search(X, 1)
     dist_to_centroid = dist_to_centroid ** 0.5

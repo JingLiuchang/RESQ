@@ -6,6 +6,8 @@
 
 #include <ctime>
 #include <cmath>
+#include <sstream>
+#include <vector>
 #include <matrix.h>
 #include <utils.h>
 #include <ivf_rabitq.h>
@@ -19,6 +21,7 @@ const int MAXK = 100;
 long double rotation_time = 0;
 int probe_base = 50;
 char data_path[256] = "";
+std::vector<int> nprobes_override;
 
 template<uint64_t D, uint64_t B>
 void test(const Matrix<float> &Q, const Matrix<float> &RandQ, const Matrix<unsigned> &G,
@@ -30,7 +33,11 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ, const Matrix<unsig
     // Search Parameter
 
     // ========================================================================
-    for (int nprobe = probe_base; nprobe <= probe_base * 20; nprobe += probe_base) {
+    std::vector<int> nprobes = nprobes_override;
+    if (nprobes.empty()) {
+        for (int i = 1; i <= 20; i++) nprobes.push_back(probe_base * i);
+    }
+    for (int nprobe : nprobes) {
         float total_time = 0;
         float total_ratio = 0;
         int correct = 0;
@@ -83,6 +90,7 @@ int main(int argc, char *argv[]) {
             {"dataset",     required_argument, 0, 'd'},
             {"source",      required_argument, 0, 's'},
             {"result_path", required_argument, 0, 'r'},
+            {"probes",      required_argument, 0, 'p'},
     };
 
     int ind, bit;
@@ -95,7 +103,7 @@ int main(int argc, char *argv[]) {
     int subk = 0;
 
     while (iarg != -1) {
-        iarg = getopt_long(argc, argv, "d:r:k:s:b:", longopts, &ind);
+        iarg = getopt_long(argc, argv, "d:r:k:s:b:p:", longopts, &ind);
         switch (iarg) {
             case 'k':
                 if (optarg)subk = atoi(optarg);
@@ -111,6 +119,16 @@ int main(int argc, char *argv[]) {
                 break;
             case 'b':
                 if (optarg) bit = atoi(optarg);
+                break;
+            case 'p':
+                if (optarg) {
+                    std::stringstream ss(optarg);
+                    std::string tok;
+                    while (std::getline(ss, tok, ',')) {
+                        int v = std::stoi(tok);
+                        if (v > 0) nprobes_override.push_back(v);
+                    }
+                }
                 break;
         }
     }
@@ -236,5 +254,35 @@ int main(int argc, char *argv[]) {
         probe_base = 30;
         test(Q, RandQ, G, ivf, subk);
     }
+    // ---- Benchmark datasets (added for PVLDB 2027 survey) ----------------
+    if (str_data == "deep1M-96") {
+        const uint64_t BB = 128, DIM = 96;
+        IVFRN<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 15;
+        test(Q, RandQ, G, ivf, subk);
+    }
+    if (str_data == "laion") {
+        const uint64_t BB = 512, DIM = 512;
+        IVFRN<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 25;
+        test(Q, RandQ, G, ivf, subk);
+    }
+    if (str_data == "text2image") {
+        const uint64_t BB = 256, DIM = 200;
+        IVFRN<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 15;
+        test(Q, RandQ, G, ivf, subk);
+    }
+    if (str_data == "imagenet1m") {
+        const uint64_t BB = 768, DIM = 768;
+        IVFRN<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 20;
+        test(Q, RandQ, G, ivf, subk);
+    }
+    // msmarco1M (d=1024) handled above by find("msmarc") with BB=1024, probe_base=30
     return 0;
 }

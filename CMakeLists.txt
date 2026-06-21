@@ -5,6 +5,13 @@ set(CMAKE_CXX_STANDARD 17)
 
 include_directories(include)
 include_directories(include/hnswlib)
+# Eigen3 is a header-only library; Ubuntu installs it under eigen3/ prefix
+find_package(Eigen3 QUIET)
+if(EIGEN3_FOUND)
+    include_directories(${EIGEN3_INCLUDE_DIR})
+else()
+    include_directories(/usr/include/eigen3)
+endif()
 find_package(OpenMP)
 
 if (OPENMP_FOUND)

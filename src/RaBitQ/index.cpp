@@ -147,5 +147,29 @@ int main(int argc, char *argv[]) {
         IVFRN <DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary);
         ivf.save(index_path);
     }
+    // ---- Benchmark datasets (added for PVLDB 2027 survey) ----------------
+    if (str_data == "deep1M-96") {
+        // Our deep1M has d=96; BB=(96+63)//64*64=128 (upward pad, same as word2vec pattern)
+        const uint64_t BB = 128, DIM = 96;
+        IVFRN <DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary);
+        ivf.save(index_path);
+    }
+    if (str_data == "laion") {
+        const uint64_t BB = 512, DIM = 512;
+        IVFRN <DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary);
+        ivf.save(index_path);
+    }
+    if (str_data == "text2image") {
+        // d=200; BB=(200+63)//64*64=256 (upward pad)
+        const uint64_t BB = 256, DIM = 200;
+        IVFRN <DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary);
+        ivf.save(index_path);
+    }
+    if (str_data == "imagenet1m") {
+        const uint64_t BB = 768, DIM = 768;
+        IVFRN <DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary);
+        ivf.save(index_path);
+    }
+    // msmarco1M (d=1024) handled above by find("msmarc") with BB=1024, DIM=1024
     return 0;
 }

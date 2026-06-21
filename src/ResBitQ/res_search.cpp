@@ -1,3 +1,4 @@
+
 #define EIGEN_DONT_PARALLELIZE
 #define USE_AVX2
 #define FAST_SCAN
@@ -6,6 +7,8 @@
 
 #include <ctime>
 #include <cmath>
+#include <sstream>
+#include <vector>
 #include <matrix.h>
 #include <utils.h>
 #include "ivf_res.h"
@@ -19,6 +22,7 @@ const int MAXK = 100;
 long double rotation_time = 0;
 int probe_base = 50;
 char data_path[256] = "";
+std::vector<int> nprobes_override;
 
 template<uint64_t D, uint64_t B>
 void test(const Matrix<float> &Q, const Matrix<float> &RandQ, const Matrix<unsigned> &G,
@@ -30,7 +34,11 @@ void test(const Matrix<float> &Q, const Matrix<float> &RandQ, const Matrix<unsig
     // Search Parameter
     // ========================================================================
 
-    for (int nprobe = probe_base; nprobe <= probe_base * 20; nprobe += probe_base) {
+    std::vector<int> nprobes = nprobes_override;
+    if (nprobes.empty()) {
+        for (int i = 1; i <= 20; i++) nprobes.push_back(probe_base * i);
+    }
+    for (int nprobe : nprobes) {
         float total_time = 0;
         float total_ratio = 0;
         int correct = 0;
@@ -83,6 +91,7 @@ int main(int argc, char *argv[]) {
             {"dataset",     required_argument, 0, 'd'},
             {"source",      required_argument, 0, 's'},
             {"result_path", required_argument, 0, 'r'},
+            {"probes",      required_argument, 0, 'p'},
     };
 
     int ind, bit;
@@ -95,7 +104,7 @@ int main(int argc, char *argv[]) {
     int subk = 0;
 
     while (iarg != -1) {
-        iarg = getopt_long(argc, argv, "d:r:k:s:b:c:", longopts, &ind);
+        iarg = getopt_long(argc, argv, "d:r:k:s:b:c:p:", longopts, &ind);
         switch (iarg) {
             case 'k':
                 if (optarg)subk = atoi(optarg);
@@ -114,6 +123,16 @@ int main(int argc, char *argv[]) {
                 break;
             case 'c':
                 if (optarg) numC = atoi(optarg);
+                break;
+            case 'p':
+                if (optarg) {
+                    std::stringstream ss(optarg);
+                    std::string tok;
+                    while (std::getline(ss, tok, ',')) {
+                        int v = std::stoi(tok);
+                        if (v > 0) nprobes_override.push_back(v);
+                    }
+                }
                 break;
         }
     }
@@ -176,6 +195,10 @@ int main(int argc, char *argv[]) {
     GetTime(&run_start, &run_end, &usr_t, &sys_t);
     rotation_time = usr_t * 1e6 / Q.n;
     std::string str_data(dataset);
+    // Strip "mrq_" prefix so existing dataset if-blocks match unchanged.
+    // File paths still use the full dataset name (via the dataset[] char array).
+    if (str_data.size() > 4 && str_data.substr(0, 4) == "mrq_")
+        str_data = str_data.substr(4);
     std::cerr << "dataset:: " << str_data << std::endl;
     if (str_data == "msong") {
         const uint64_t BB = 128, DIM = 420;
@@ -221,7 +244,7 @@ int main(int argc, char *argv[]) {
         const uint64_t BB = 64, DIM = 128;
         IVFRES<DIM, BB> ivf;
         ivf.load(index_path);
-        probe_base = 8;
+        probe_base = 50;
         var_count = 4;
         test(PCAQ, RandQ, G, ivf, subk);
     }
@@ -265,5 +288,39 @@ int main(int argc, char *argv[]) {
         var_count = 10;
         test(PCAQ, RandQ, G, ivf, subk);
     }
+    // ---- Benchmark datasets (added for PVLDB 2027 survey) ----------------
+    if (str_data == "deep1M-96") {
+        const uint64_t BB = 64, DIM = 96;
+        IVFRES<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 15;
+        var_count = 4;
+        test(PCAQ, RandQ, G, ivf, subk);
+    }
+    if (str_data == "laion") {
+        const uint64_t BB = 256, DIM = 512;
+        IVFRES<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 25;
+        var_count = 5;
+        test(PCAQ, RandQ, G, ivf, subk);
+    }
+    if (str_data == "text2image") {
+        const uint64_t BB = 128, DIM = 200;
+        IVFRES<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 15;
+        var_count = 4;
+        test(PCAQ, RandQ, G, ivf, subk);
+    }
+    if (str_data == "imagenet1m") {
+        const uint64_t BB = 384, DIM = 768;
+        IVFRES<DIM, BB> ivf;
+        ivf.load(index_path);
+        probe_base = 20;
+        var_count = 5;
+        test(PCAQ, RandQ, G, ivf, subk);
+    }
+    // msmarco1M (d=1024) handled above by find("msmarc") with BB=320, probe_base=30, var_count=20
     return 0;
 }
