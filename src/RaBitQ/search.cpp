@@ -240,7 +240,7 @@ int main(int argc, char *argv[]) {
         probe_base = 30;
         test(Q, RandQ, G, ivf, subk);
     }
-    if (str_data == "msmarc-small") {
+    if (str_data.find("msmarc") != std::string::npos) {
         const uint64_t BB = 1024, DIM = 1024;
         IVFRN<DIM, BB> ivf;
         ivf.load(index_path);
