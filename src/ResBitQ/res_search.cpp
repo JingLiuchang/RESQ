@@ -306,7 +306,7 @@ int main(int argc, char *argv[]) {
         test(PCAQ, RandQ, G, ivf, subk);
     }
     if (str_data == "text2image") {
-        const uint64_t BB = 128, DIM = 200;
+        const uint64_t BB = 160, DIM = 200;
         IVFRES<DIM, BB> ivf;
         ivf.load(index_path);
         probe_base = 15;

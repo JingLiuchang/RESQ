@@ -28,6 +28,8 @@ float var_count = 5.0;
 template<uint64_t D, uint64_t B>
 class Space {
 public:
+    static constexpr uint64_t CODE_WORDS = (B + 63) / 64;
+
     // ================================================================================================
     // ********************
     //   Binary Operation
@@ -80,7 +82,7 @@ public:
 template<uint64_t D, uint64_t B>
 inline uint64_t Space<D, B>::ip_bin_bin(uint64_t *q, uint64_t *d) {
     uint64_t ret = 0;
-    for (int i = 0; i < B / 64; i++) {
+    for (int i = 0; i < CODE_WORDS; i++) {
         ret += __builtin_popcountll((*d) & (*q));
         q++;
         d++;
@@ -94,7 +96,7 @@ inline uint64_t Space<D, B>::ip_bin_bin(uint64_t *q, uint64_t *d) {
 template<uint64_t D, uint64_t B>
 inline uint64_t Space<D, B>::popcount(u_int64_t *d) {
     uint64_t ret = 0;
-    for (int i = 0; i < B / 64; i++) {
+    for (int i = 0; i < CODE_WORDS; i++) {
         ret += __builtin_popcountll((*d));
         d++;
     }
@@ -110,7 +112,7 @@ uint64_t Space<D, B>::ip_byte_bin(uint64_t *q, uint64_t *d) {
     uint64_t ret = 0;
     for (int i = 0; i < B_QUERY; i++) {
         ret += (ip_bin_bin(q, d) << i);
-        q += (B / 64);
+        q += CODE_WORDS;
     }
     return ret;
 }
@@ -126,7 +128,7 @@ void Space<D, B>::transpose_bin(uint8_t *q, uint64_t *tq) {
         for (int j = 0; j < B_QUERY; j++) {
             uint64_t v1 = _mm256_movemask_epi8(v);
             v1 = reverseBits(v1);
-            tq[(B_QUERY - j - 1) * (B / 64) + i / 64] |= ((uint64_t) v1 << ((i / 32 % 2 == 0) ? 32 : 0));
+            tq[(B_QUERY - j - 1) * CODE_WORDS + i / 64] |= ((uint64_t) v1 << ((i / 32 % 2 == 0) ? 32 : 0));
             v = _mm256_add_epi32(v, v);
         }
         q += 32;

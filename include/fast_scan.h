@@ -157,13 +157,18 @@ void pack_codes(const uint64_t* binary_code, uint32_t ncode, uint8_t* blocks){
     uint32_t ncode_pad = (ncode + 31) / 32 * 32;
     memset(blocks, 0, ncode_pad * sizeof(uint8_t));
 
-    uint8_t * binary_code_8bit = new uint8_t [ncode_pad * B / 8];
-    memcpy(binary_code_8bit, binary_code, ncode * B / 64 * sizeof(uint64_t));
-
-    for(int i=0;i<ncode;i++)
-        for(int j=0;j<B/64;j++)
-            for(int k=0;k<4;k++)
-                swap(binary_code_8bit[i * B / 8 + 8 * j + k], binary_code_8bit[i * B / 8 + 8 * j + 8 - k - 1]);
+    static_assert(B % 8 == 0, "FastScan code width must be byte-aligned");
+    constexpr uint32_t CODE_WORDS = (B + 63) / 64;
+    uint8_t * binary_code_8bit = new uint8_t [ncode_pad * B / 8]();
+    const uint8_t * source_bytes = reinterpret_cast<const uint8_t *>(binary_code);
+    for(int i=0;i<ncode;i++) {
+        for(int j=0;j<B/8;j++) {
+            const int word = j / 8;
+            const int byte = j % 8;
+            binary_code_8bit[i * B / 8 + j] =
+                    source_bytes[i * CODE_WORDS * 8 + word * 8 + (7 - byte)];
+        }
+    }
 
     for(int i=0;i<ncode*B/8;i++){
         uint8_t v = binary_code_8bit[i];

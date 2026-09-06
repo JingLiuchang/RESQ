@@ -28,6 +28,7 @@ public:
     Factor *fac;
     static constexpr float fac_norm = const_sqrt(1.0 * B);
     static constexpr float max_x1 = 1.9 / const_sqrt(1.0 * B - 1.0);
+    static constexpr uint64_t CODE_WORDS = (B + 63) / 64;
 
     static Space<D, B> space;
 
@@ -44,7 +45,7 @@ public:
     float *var_;                     // variance of each dimension
     float *mean_;                    // mean of each dimension
 
-    uint64_t *binary_code;           // (B / 64) * N of 64-bit uint64_t
+    uint64_t *binary_code;           // CODE_WORDS * N of 64-bit uint64_t
     uint8_t *packed_code;            // packed code with the batch size of 32 vectors
 
 
@@ -467,7 +468,7 @@ void IVFRES<D, B>::save(char *filename) {
     output.write((char *) mean_, D * sizeof(float));
 
     output.write((char *) centroid, C * B * sizeof(float));
-    output.write((char *) binary_code, (size_t) N * B / 64 * sizeof(uint64_t));
+    output.write((char *) binary_code, (size_t) N * CODE_WORDS * sizeof(uint64_t));
 #ifdef RESIDUAL_SPLIT
     output.write((char *) data, (size_t) N * B * sizeof(float));
     output.write((char *) res_data, (size_t) N * (D - B + 1) * sizeof(float));
@@ -512,7 +513,7 @@ void IVFRES<D, B>::load(char *filename) {
     data = new float[N * D];
 #endif
 
-    binary_code = static_cast<uint64_t *>(aligned_alloc(256, (size_t) N * B / 64 * sizeof(uint64_t)));
+    binary_code = static_cast<uint64_t *>(aligned_alloc(256, (size_t) N * CODE_WORDS * sizeof(uint64_t)));
 
     start = new uint64_t[C];
     len = new uint64_t[C];
@@ -534,7 +535,7 @@ void IVFRES<D, B>::load(char *filename) {
     input.read((char *) mean_, D * sizeof(float));
 
     input.read((char *) centroid, C * B * sizeof(float));
-    input.read((char *) binary_code, (size_t) N * B / 64 * sizeof(uint64_t));
+    input.read((char *) binary_code, (size_t) N * CODE_WORDS * sizeof(uint64_t));
 
 #ifdef RESIDUAL_SPLIT
     input.read((char *) data, (size_t) N * B * sizeof(float));
@@ -551,7 +552,7 @@ void IVFRES<D, B>::load(char *filename) {
     }
     packed_code = static_cast<uint8_t *>(aligned_alloc(32, cur * sizeof(uint8_t)));
     for (int64_t i = 0; i < C; i++) {
-        pack_codes<B>(binary_code + start[i] * (B / 64), len[i], packed_code + packed_start[i]);
+        pack_codes<B>(binary_code + start[i] * CODE_WORDS, len[i], packed_code + packed_start[i]);
     }
     double ave_error = 0;
 #pragma omp parallel for reduction(+: ave_error)
@@ -567,7 +568,7 @@ void IVFRES<D, B>::load(char *filename) {
 #endif
         fac[i].error = 2 * max_x1 * std::sqrt(x_x0 * x_x0 - dist_to_c[i] * dist_to_c[i]);
         ave_error += fac[i].error;
-        fac[i].factor_ppc = -2 / fac_norm * x_x0 * ((float) space.popcount(binary_code + i * B / 64) * 2 - B);
+        fac[i].factor_ppc = -2 / fac_norm * x_x0 * ((float) space.popcount(binary_code + i * CODE_WORDS) * 2 - B);
         fac[i].factor_ip = -2 / fac_norm * x_x0;
     }
     ave_error /= N;
@@ -599,7 +600,7 @@ IVFRES<D, B>::IVFRES(const Matrix<float> &X, const Matrix<float> &_centroids, co
     C = _centroids.n;
     RD = D - B + 1;
     // check uint64_t
-    assert(B % 64 == 0);
+    assert(B % 32 == 0);
 
     start = new uint64_t[C];
     len = new uint64_t[C];
@@ -633,7 +634,7 @@ IVFRES<D, B>::IVFRES(const Matrix<float> &X, const Matrix<float> &_centroids, co
 #else
     data = new float[N * D];
 #endif
-    binary_code = new uint64_t[N * B / 64];
+    binary_code = new uint64_t[N * CODE_WORDS];
 
     std::memcpy(centroid, _centroids.data, C * B * sizeof(float));
 #pragma omp parallel for schedule (dynamic, 144)
@@ -646,7 +647,7 @@ IVFRES<D, B>::IVFRES(const Matrix<float> &X, const Matrix<float> &_centroids, co
 #else
         std::memcpy(data + i * D, X.data + x * X.d, D * sizeof(float));
 #endif
-        std::memcpy(binary_code + i * (B/64), binary.data + x * (B / 64), (B / 64) * sizeof(uint64_t));
+        std::memcpy(binary_code + i * CODE_WORDS, binary.data + x * CODE_WORDS, CODE_WORDS * sizeof(uint64_t));
     }
     std::cerr << "load finished" << std::endl;
 }
@@ -665,7 +666,7 @@ IVFRES<D, B>::IVFRES(char *base_file, const Matrix<float> &_centroids, const Mat
     C = _centroids.n;
     RD = D - B + 1;
     // check uint64_t
-    assert(B % 64 == 0);
+    assert(B % 32 == 0);
 
     start = new uint64_t[C];
     len = new uint64_t[C];
@@ -703,7 +704,7 @@ IVFRES<D, B>::IVFRES(char *base_file, const Matrix<float> &_centroids, const Mat
 #else
     data = new float[N * D];
 #endif
-    binary_code = new uint64_t[(size_t) N * B / 64];
+    binary_code = new uint64_t[(size_t) N * CODE_WORDS];
 
     std::memcpy(centroid, _centroids.data, C * B * sizeof(float));
     float read_buffer[D];
@@ -723,7 +724,7 @@ IVFRES<D, B>::IVFRES(char *base_file, const Matrix<float> &_centroids, const Mat
 #else
         std::memcpy(data + pos * D, read_buffer, D * sizeof(float));
 #endif
-        std::memcpy(binary_code + pos * (B / 64), binary.data + x * (B / 64), (B / 64) * sizeof(uint64_t));
+        std::memcpy(binary_code + pos * CODE_WORDS, binary.data + x * CODE_WORDS, CODE_WORDS * sizeof(uint64_t));
     }
     std::cerr << "load finished" << std::endl;
 }

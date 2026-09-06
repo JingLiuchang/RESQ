@@ -22,6 +22,16 @@ def GenerateBinaryCode(X, P):
     return binary_XP, X0
 
 
+def PackBinaryCodes(binary_codes):
+    n, bits = binary_codes.shape
+    if bits % 32 != 0:
+        raise ValueError(f'RESQ code width must be a multiple of 32, got {bits}')
+    storage_bits = (bits + 63) // 64 * 64
+    padded_codes = np.pad(binary_codes, ((0, 0), (0, storage_bits - bits)), 'constant')
+    packed_codes = np.packbits(padded_codes.reshape(-1, 8, 8)[:, ::-1]).view(np.uint64)
+    return packed_codes.reshape(n, storage_bits // 64)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='random projection')
     parser.add_argument('-d', '--dataset', help='dataset', default='gist')
@@ -43,8 +53,14 @@ if __name__ == "__main__":
     cluster_id = I64vecs_read(cluster_id_path)
     X = X[:, :bits]
     D = X.shape[1]
-    B = (D + 63) // 64 * 64
-    MAX_BD = max(D, B)
+    B = D
+    if B % 32 != 0:
+        raise ValueError(f'RESQ projection dimension must be a multiple of 32, got {B}')
+    if centroids.shape[1] != D:
+        raise ValueError(
+            f'Centroid dimension {centroids.shape[1]} does not match projection dimension {D}'
+        )
+    MAX_BD = B
 
     projection_path = os.path.join(path, f'RESP_C{C}_B{B}.fvecs')
     randomized_centroid_path = os.path.join(path, f'RESCentroid_C{C}_B{B}.fvecs')
@@ -76,9 +92,7 @@ if __name__ == "__main__":
 
     print(np.mean(x0))
 
-    bin_XP = bin_XP[:, :B].flatten()
-    uint64_XP = np.packbits(bin_XP.reshape(-1, 8, 8)[:, ::-1]).view(np.uint64)
-    uint64_XP = uint64_XP.reshape(-1, B >> 6)
+    uint64_XP = PackBinaryCodes(bin_XP[:, :B])
 
     # Output
     fvecs_write(randomized_centroid_path, CP)

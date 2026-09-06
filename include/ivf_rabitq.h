@@ -32,6 +32,23 @@ public:
         float factor_ip;
     };
 
+#if defined(ESTIMATED_RERANK)
+    struct RerankCandidate {
+        float estimated_dist;
+        uint64_t id;
+        float *data;
+    };
+
+    struct RerankCandidateWorse {
+        bool operator()(const RerankCandidate &a, const RerankCandidate &b) const {
+            if (a.estimated_dist == b.estimated_dist) return a.id < b.id;
+            return a.estimated_dist < b.estimated_dist;
+        }
+    };
+
+    typedef std::priority_queue<RerankCandidate, std::vector<RerankCandidate>, RerankCandidateWorse> RerankCandidateHeap;
+#endif
+
     Factor * fac;
     static constexpr float fac_norm = const_sqrt(1.0 * B);
     static constexpr float max_x1 = 1.9 / const_sqrt(1.0 * B-1.0);
@@ -62,16 +79,33 @@ public:
     ~IVFRN();
 
     ResultHeap search(float* query, float* rd_query, uint64_t k, uint64_t nprobe, float distK = std::numeric_limits<float>::max(), Disk_IO *read_buffer=nullptr) const;
+#if defined(ESTIMATED_RERANK)
+    ResultHeap search_estimated_rerank(float* query, float* rd_query, uint64_t k, uint64_t nprobe, uint64_t rerank_size) const;
+#endif
 
     static void scan(ResultHeap &KNNs, float &distK, uint64_t k, \
                         uint64_t *quant_query, uint64_t *ptr_binary_code,  uint64_t len, Factor *ptr_fac, \
                         const float  sqr_y, const float vl, const float  width, const float sumq,\
                         float *query, float *data, uint64_t *id);
 
+#if defined(ESTIMATED_RERANK)
+    static void scan_estimated_rerank(RerankCandidateHeap &candidates, uint64_t rerank_size, \
+                        uint64_t *quant_query, uint64_t *ptr_binary_code,  uint64_t len, Factor *ptr_fac, \
+                        const float  sqr_y, const float vl, const float  width, const float sumq,\
+                        float *data, uint64_t *id);
+#endif
+
     static void fast_scan(ResultHeap &KNNs, float &distK, uint64_t k, \
                         uint8_t *LUT, uint8_t *packed_code, uint64_t len, Factor *ptr_fac, \
                         const float  sqr_y, const float vl, const float  width, const float sumq,\
                         float *query, float *data, uint64_t *id);
+
+#if defined(ESTIMATED_RERANK)
+    static void fast_scan_estimated_rerank(RerankCandidateHeap &candidates, uint64_t rerank_size, \
+                        uint8_t *LUT, uint8_t *packed_code, uint64_t len, Factor *ptr_fac, \
+                        const float  sqr_y, const float vl, const float  width, const float sumq,\
+                        float *data, uint64_t *id);
+#endif
 
     static void disk_scan(ResultHeap &KNNs, float &distK, uint64_t k, \
                         uint8_t *LUT, uint8_t *packed_code, uint64_t len, Factor *ptr_fac, \
@@ -81,6 +115,29 @@ public:
     void save(char* filename);
     void load(char* filename);
 };
+
+#if defined(ESTIMATED_RERANK)
+template <uint64_t D, uint64_t B>
+inline void push_estimated_candidate(
+        typename IVFRN<D, B>::RerankCandidateHeap &candidates,
+        uint64_t rerank_size,
+        float estimated_dist,
+        float *data,
+        uint64_t id) {
+    if (rerank_size == 0) return;
+    typename IVFRN<D, B>::RerankCandidate candidate{
+            estimated_dist,
+            id,
+            data,
+    };
+    if (candidates.size() < rerank_size) {
+        candidates.push(candidate);
+    } else if (estimated_dist < candidates.top().estimated_dist) {
+        candidates.pop();
+        candidates.push(candidate);
+    }
+}
+#endif
 
 // scan impl
 template <uint64_t D, uint64_t B>
@@ -159,6 +216,27 @@ void IVFRN<D, B>::scan(ResultHeap &KNNs, float &distK, uint64_t k, \
         id++;
     }
 }
+
+#if defined(ESTIMATED_RERANK)
+template <uint64_t D, uint64_t B>
+void IVFRN<D, B>::scan_estimated_rerank(RerankCandidateHeap &candidates, uint64_t rerank_size, \
+                        uint64_t *quant_query, uint64_t *ptr_binary_code,  uint64_t len, Factor *ptr_fac, \
+                        const float sqr_y, const float vl, const float width, const float sumq, \
+                        float *data, uint64_t *id){
+
+    for(int64_t i=0;i<len;i++){
+        float tmp_dist = (ptr_fac -> sqr_x) + sqr_y + ptr_fac -> factor_ppc * vl + (space.ip_byte_bin(quant_query, ptr_binary_code) * 2 -sumq) * (ptr_fac -> factor_ip) * width;
+        push_estimated_candidate<D, B>(candidates, rerank_size, tmp_dist, data, *id);
+        ptr_binary_code += B / 64;
+        ptr_fac ++;
+        data += D;
+        id++;
+#ifdef COUNT_SCAN
+        all_dist_count++;
+#endif
+    }
+}
+#endif
 
 template <uint64_t D, uint64_t B>
 void IVFRN<D, B>::fast_scan(ResultHeap &KNNs, float &distK, uint64_t k, \
@@ -250,6 +328,55 @@ void IVFRN<D, B>::fast_scan(ResultHeap &KNNs, float &distK, uint64_t k, \
         }
     }
 }
+
+#if defined(ESTIMATED_RERANK)
+template <uint64_t D, uint64_t B>
+void IVFRN<D, B>::fast_scan_estimated_rerank(RerankCandidateHeap &candidates, uint64_t rerank_size, \
+                        uint8_t *LUT, uint8_t *packed_code,  uint64_t len, Factor *ptr_fac, \
+                        const float sqr_y, const float vl, const float width, const float sumq, \
+                        float *data, uint64_t *id){
+
+    for(int64_t i=0;i<B/4*16;i++)LUT[i] *= 2;
+
+    constexpr uint64_t SIZE = 32;
+    uint64_t it = len / SIZE;
+    uint64_t remain = len - it * SIZE;
+    uint64_t nblk_remain = (remain + 31) / 32;
+
+    while(it --){
+        uint16_t PORTABLE_ALIGN32 result[SIZE];
+        accumulate<B>((SIZE / 32), packed_code, LUT, result);
+        packed_code += SIZE * B / 8;
+
+        for(int64_t i=0;i<SIZE;i++){
+            float tmp_dist = (ptr_fac -> sqr_x) + sqr_y + ptr_fac -> factor_ppc * vl + (result[i]-sumq) * (ptr_fac -> factor_ip) * width;
+            push_estimated_candidate<D, B>(candidates, rerank_size, tmp_dist, data, *id);
+            ptr_fac ++;
+            data += D;
+            id++;
+#ifdef COUNT_SCAN
+            all_dist_count++;
+#endif
+        }
+    }
+
+    {
+        uint16_t PORTABLE_ALIGN32 result[SIZE];
+        accumulate<B>(nblk_remain, packed_code, LUT, result);
+
+        for(int64_t i=0;i<remain;i++){
+            float tmp_dist = (ptr_fac -> sqr_x) + sqr_y + ptr_fac -> factor_ppc * vl + (result[i] - sumq) * ptr_fac -> factor_ip * width;
+            push_estimated_candidate<D, B>(candidates, rerank_size, tmp_dist, data, *id);
+            ptr_fac ++;
+            data += D;
+            id++;
+#ifdef COUNT_SCAN
+            all_dist_count++;
+#endif
+        }
+    }
+}
+#endif
 
 template <uint64_t D, uint64_t B>
 void IVFRN<D, B>::disk_scan(ResultHeap &KNNs, float &distK, uint64_t k, \
@@ -398,6 +525,78 @@ ResultHeap IVFRN<D, B>::search(float* query, float* rd_query, uint64_t k, uint64
     }
     return KNNs;
 }
+
+#if defined(ESTIMATED_RERANK)
+template <uint64_t D, uint64_t B>
+ResultHeap IVFRN<D, B>::search_estimated_rerank(float* query, float* rd_query, uint64_t k, uint64_t nprobe, uint64_t rerank_size) const{
+    RerankCandidateHeap candidates;
+    uint64_t effective_rerank_size = std::max<uint64_t>(k, rerank_size);
+
+    // ===========================================================================================================
+    // Find out the nearest N_{probe} centroids to the query vector.
+    Result centroid_dist[numC];
+    float * ptr_c = centroid;
+    for(int64_t i=0;i<C;i++){
+        centroid_dist[i].first = sqr_dist<B>(rd_query, ptr_c);
+        centroid_dist[i].second = i;
+        ptr_c += B;
+    }
+    std::partial_sort(centroid_dist, centroid_dist + nprobe, centroid_dist + numC);
+
+    // ===========================================================================================================
+    // Scan the first nprobe clusters and keep top-R by estimated distance.
+    Result *ptr_centroid_dist = (&centroid_dist[0]);
+    uint8_t  PORTABLE_ALIGN64 byte_query[B];
+
+    for(int64_t pb=0;pb<nprobe;pb++){
+        uint64_t c = ptr_centroid_dist -> second;
+        float sqr_y = ptr_centroid_dist -> first;
+        ptr_centroid_dist ++;
+
+        float vl, vr;
+        space.range(rd_query, centroid + c * B, vl, vr);
+        float width = (vr - vl) / ((1 << B_QUERY) - 1);
+        uint64_t sum_q = 0;
+        space.quantize(byte_query, rd_query, centroid + c * B, u, vl, width, sum_q);
+
+#if defined(SCAN)
+        uint64_t PORTABLE_ALIGN32 quant_query[B_QUERY * B / 64];
+        memset(quant_query, 0, sizeof(quant_query));
+        space.transpose_bin(byte_query, quant_query);
+        scan_estimated_rerank(candidates, effective_rerank_size, \
+                quant_query, binary_code + start[c] * (B / 64), len[c], fac + start[c], \
+                sqr_y, vl, width, sum_q, \
+                data + start[c] * D, id + start[c]);
+#elif defined(FAST_SCAN)
+        uint8_t PORTABLE_ALIGN32 LUT[B / 4 * 16];
+        pack_LUT<B>(byte_query, LUT);
+        fast_scan_estimated_rerank(candidates, effective_rerank_size, \
+                LUT, packed_code + packed_start[c], len[c], fac + start[c], \
+                sqr_y, vl, width, sum_q, \
+                data + start[c] * D, id + start[c]);
+#endif
+    }
+
+    // ===========================================================================================================
+    // Exact full-dimensional rerank only the top-R estimated-distance candidates.
+    ResultHeap KNNs;
+    float distK = std::numeric_limits<float>::max();
+    while(!candidates.empty()){
+        RerankCandidate candidate = candidates.top();
+        candidates.pop();
+        float gt_dist = sqr_dist<D>(query, candidate.data);
+        if(gt_dist < distK){
+            KNNs.emplace(gt_dist, candidate.id);
+            if(KNNs.size() > k) KNNs.pop();
+            if(KNNs.size() == k)distK = KNNs.top().first;
+        }
+#ifdef COUNT_SCAN
+        count_scan++;
+#endif
+    }
+    return KNNs;
+}
+#endif
 
 
 

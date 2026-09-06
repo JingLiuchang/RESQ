@@ -164,7 +164,7 @@ int main(int argc, char *argv[]) {
         ivf.save(index_path);
     }
     // ---- Benchmark datasets (added for PVLDB 2027 survey) ----------------
-    // BB must be a multiple of 64 and ≤ DIM; bpd = BB/DIM
+    // BB must be a multiple of 32 and ≤ DIM; bpd = BB/DIM
     if (str_data == "deep1M-96") {
         // d=96, BB=64 (only valid multiple of 64 ≤ 96), bpd≈0.667
         const uint64_t BB = 64, DIM = 96;
@@ -178,8 +178,8 @@ int main(int argc, char *argv[]) {
         ivf.save(index_path);
     }
     if (str_data == "text2image") {
-        // d=200, BB=128, bpd=0.64
-        const uint64_t BB = 128, DIM = 200;
+        // d=200, BB=160, bpd=0.8
+        const uint64_t BB = 160, DIM = 200;
         IVFRES<DIM, BB> ivf(X, C, dist_to_centroid, x0, cluster_id, binary, M);
         ivf.save(index_path);
     }
